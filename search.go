@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ArcWiki/ArcWiki/db"
+	"github.com/ArcWiki/ArcWiki/validation"
 	"github.com/gomarkdown/markdown"
 	"github.com/houseme/mobiledetect"
 	log "github.com/sirupsen/logrus"
@@ -46,9 +47,21 @@ type SearchData struct {
 
 func QueryHandler(w http.ResponseWriter, r *http.Request) {
 	query := strings.ToLower(strings.TrimSpace(r.FormValue("query")))
-	log.Info("Search Query: ", query)
 
-	if query == "" {
+	// Validate search query
+	validatedQuery, err := validation.ValidateSearchQuery(query)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"query": validation.SanitizeForLog(query),
+		}).Warn("Invalid search query")
+		http.Error(w, "Invalid search query: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	log.WithField("query", validation.SanitizeForLog(validatedQuery)).Info("Search Query")
+
+	if validatedQuery == "" {
 		http.Redirect(w, r, "/search", http.StatusFound)
 		return
 	}
@@ -62,8 +75,8 @@ func QueryHandler(w http.ResponseWriter, r *http.Request) {
 	defer dbConn.Close()
 
 	// Normalize query input: allow underscores, spaces, and lowercase matching
-	likeQuery := "%" + strings.ReplaceAll(query, " ", "_") + "%"
-	altLikeQuery := "%" + strings.ReplaceAll(query, "_", " ") + "%"
+	likeQuery := "%" + strings.ReplaceAll(validatedQuery, " ", "_") + "%"
+	altLikeQuery := "%" + strings.ReplaceAll(validatedQuery, "_", " ") + "%"
 
 	stmt, err := dbConn.Prepare(`
 		SELECT title, body 
@@ -79,7 +92,7 @@ func QueryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer stmt.Close()
 
-	rows, err := stmt.Query(likeQuery, altLikeQuery, "%"+query+"%")
+	rows, err := stmt.Query(likeQuery, altLikeQuery, "%"+validatedQuery+"%")
 	if err != nil {
 		log.Error("Failed to run search query:", err)
 		http.Error(w, "Search execution error", http.StatusInternalServerError)

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/ArcWiki/ArcWiki/db"
+	"github.com/ArcWiki/ArcWiki/validation"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/gomarkdown/markdown"
@@ -69,7 +70,27 @@ type EditPage struct {
 }
 
 func (p *Page) save() error {
-	log.Info("Saving page: " + canonicalizeTitle(p.Title))
+	// Validate title
+	validatedTitle, err := validation.ValidateTitle(p.Title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(p.Title),
+		}).Error("Invalid title during save")
+		return err
+	}
+
+	// Validate body
+	validatedBody, err := validation.ValidateBody(string(p.Body))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(validatedTitle),
+		}).Error("Invalid body during save")
+		return err
+	}
+
+	log.WithField("title", validation.SanitizeForLog(validatedTitle)).Info("Saving page")
 
 	db, err := db.LoadDatabase()
 	if err != nil {
@@ -89,17 +110,17 @@ func (p *Page) save() error {
 		}
 	}()
 
-	title := canonicalizeTitle(p.Title)
+	title := canonicalizeTitle(validatedTitle)
 
 	var pageID int
 	err = tx.QueryRow("SELECT id FROM Pages WHERE title = ?", title).Scan(&pageID)
 
 	if err == sql.ErrNoRows {
 		// INSERT new page
-		log.Info("Page not found, inserting new:", title)
+		log.WithField("title", validation.SanitizeForLog(title)).Info("Page not found, inserting new")
 		res, err := tx.Exec(
 			"INSERT INTO Pages (title, body, user_id, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-			title, string(p.Body), 1,
+			title, validatedBody, 1,
 		)
 		if err != nil {
 			log.Error("Insert error:", err)
@@ -107,7 +128,7 @@ func (p *Page) save() error {
 		}
 		lastID, _ := res.LastInsertId()
 		pageID = int(lastID)
-		log.Info("Inserted new page with ID:", pageID)
+		log.WithField("pageID", pageID).Info("Inserted new page")
 	} else if err != nil {
 		log.Error("Error checking for page existence:", err)
 		return err
@@ -115,13 +136,13 @@ func (p *Page) save() error {
 		// UPDATE existing page
 		_, err = tx.Exec(
 			"UPDATE Pages SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			string(p.Body), pageID,
+			validatedBody, pageID,
 		)
 		if err != nil {
 			log.Error("Update error:", err)
 			return err
 		}
-		log.Info("Updated page with ID:", pageID)
+		log.WithField("pageID", pageID).Info("Updated page")
 	}
 
 	// Remove previous category links
@@ -133,12 +154,12 @@ func (p *Page) save() error {
 	// Match categories in content
 	var categoryIDs []int
 	re := regexp.MustCompile(`\[Category:([^\]|]*)\]`)
-	for _, match := range re.FindAllStringSubmatch(string(p.Body), -1) {
+	for _, match := range re.FindAllStringSubmatch(validatedBody, -1) {
 		var catID int
 		if err := tx.QueryRow("SELECT id FROM Categories WHERE title = ?", match[1]).Scan(&catID); err == nil {
 			categoryIDs = append(categoryIDs, catID)
 		} else {
-			log.Warnf("Unknown category: %s", match[1])
+			log.Warnf("Unknown category: %s", validation.SanitizeForLog(match[1]))
 		}
 	}
 
@@ -155,24 +176,48 @@ func (p *Page) save() error {
 		return err
 	}
 
-	log.Infof("Successfully saved page: %s", title)
+	log.WithField("title", validation.SanitizeForLog(title)).Info("Successfully saved page")
 	return nil
 }
 
 func addPage(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	title := r.FormValue("title")
-	if title != "index" {
-		body := r.FormValue("body")
+	body := r.FormValue("body")
+
+	// Validate title
+	validatedTitle, err := validation.ValidateTitle(title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(title),
+		}).Error("Invalid title during addPage")
+		http.Error(w, "Invalid title: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate body
+	validatedBody, err := validation.ValidateBody(body)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(validatedTitle),
+		}).Error("Invalid body during addPage")
+		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if validatedTitle != "index" {
 		// We Fix make the category links straight away more dev here
 		regex := regexp.MustCompile(`\[Category:([^\]|]*)\]`)
-		matches := regex.FindAllStringSubmatch(body, -1) // Find all matches
+		matches := regex.FindAllStringSubmatch(validatedBody, -1) // Find all matches
 
-		freshTitle := canonicalizeTitle(title)
+		freshTitle := canonicalizeTitle(validatedTitle)
 
 		db, err := db.LoadDatabase()
 		if err != nil {
 			log.Error("Database Error:", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
 			return // Handle error
 		}
 
@@ -182,28 +227,31 @@ func addPage(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 
 			log.Error("Database Error:", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
 			return // Handle error
 		}
 		defer tx.Rollback() // Rollback if any error occurs
 
-		result, err := tx.Exec(stmt, freshTitle, body, 1)
+		result, err := tx.Exec(stmt, freshTitle, validatedBody, 1)
 		if err != nil {
 
 			log.Error("Database Error:", err) // Clearer message
 
 			_ = tx.Rollback() // rollback if error occurs
+			http.Error(w, "Database error", http.StatusInternalServerError)
 			return            // Handle error
 		}
 
 		var pageID int64
 		pageID, err = result.LastInsertId()
 
-		log.Info("Page id inserted is :", pageID) // Clearer message
+		log.WithField("pageID", pageID).Info("Page id inserted") // Clearer message
 
 		if err != nil {
 
 			log.Error("Database Error:", err)
 			_ = tx.Rollback() // Explicitly rollback if error occurs
+			http.Error(w, "Database error", http.StatusInternalServerError)
 			return            // Handle error
 		}
 
@@ -229,6 +277,7 @@ func addPage(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				log.Error("Database Error:", err)
 				_ = tx.Rollback() // Explicitly
+				http.Error(w, "Database error", http.StatusInternalServerError)
 				return            // Handle error
 			}
 		}
@@ -237,6 +286,7 @@ func addPage(w http.ResponseWriter, r *http.Request) {
 		err = tx.Commit()
 		if err != nil {
 			log.Error("Database Error:", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
 
 			return // Handle error
 		}
@@ -249,6 +299,16 @@ func addPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Page) deletePage() error {
+	// Validate title
+	validatedTitle, err := validation.ValidateTitle(p.Title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(p.Title),
+		}).Error("Invalid title during deletePage")
+		return err
+	}
+
 	db, err := db.LoadDatabase()
 	if err != nil {
 		log.Error("Database Error:", err)
@@ -267,14 +327,14 @@ func (p *Page) deletePage() error {
 	}()
 	var pageID int
 	// Check if the page exists before deleting
-	row := tx.QueryRow("SELECT id FROM Pages WHERE title = ?", canonicalizeTitle(p.Title))
+	row := tx.QueryRow("SELECT id FROM Pages WHERE title = ?", canonicalizeTitle(validatedTitle))
 	// Placeholder variable to eliminate unnecessary scan
 	err = row.Scan(&pageID)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
 
-			log.Warn("page with title", canonicalizeTitle(p.Title)+" not found")
+			log.WithField("title", validation.SanitizeForLog(canonicalizeTitle(validatedTitle))).Warn("page not found")
 		}
 
 		log.Error("error checking for existing page: %w", err)
@@ -288,7 +348,7 @@ func (p *Page) deletePage() error {
 	}
 
 	// Delete the page
-	result, err := tx.Exec("DELETE FROM Pages WHERE title = ?", canonicalizeTitle(p.Title))
+	result, err := tx.Exec("DELETE FROM Pages WHERE title = ?", canonicalizeTitle(validatedTitle))
 	if err != nil {
 		log.Error("error deleting page:", err)
 	}
@@ -299,9 +359,9 @@ func (p *Page) deletePage() error {
 	}
 
 	if rowsDeleted > 0 {
-		log.Error("Deleted page with title:", canonicalizeTitle(p.Title))
+		log.WithField("title", validation.SanitizeForLog(canonicalizeTitle(validatedTitle))).Info("Deleted page")
 	} else {
-		log.Error("No page found with title:", canonicalizeTitle(p.Title)) // May indicate a race condition
+		log.WithField("title", validation.SanitizeForLog(canonicalizeTitle(validatedTitle))).Warn("No page found") // May indicate a race condition
 	}
 
 	err = tx.Commit() // Commit the transaction
@@ -316,15 +376,37 @@ func saveHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 	titleSave := r.FormValue("title")
 	body := r.FormValue("body")
 
-	p := &Page{CTitle: title, Title: titleSave, Body: template.HTML(body)}
-	err := p.save()
+	// Validate title
+	validatedTitle, err := validation.ValidateTitle(titleSave)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(titleSave),
+		}).Error("Invalid title during saveHandler")
+		http.Error(w, "Invalid title: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Validate body
+	validatedBody, err := validation.ValidateBody(body)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(validatedTitle),
+		}).Error("Invalid body during saveHandler")
+		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	p := &Page{CTitle: title, Title: validatedTitle, Body: template.HTML(validatedBody)}
+	err = p.save()
 	if err != nil {
 		log.Error("Error Saving Page:", err)
 
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/title/"+canonicalizeTitle(titleSave), http.StatusFound)
+	http.Redirect(w, r, "/title/"+canonicalizeTitle(validatedTitle), http.StatusFound)
 }
 func loadPage(title string, userAgent string) (*Page, error) {
 
