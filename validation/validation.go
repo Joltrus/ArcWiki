@@ -187,7 +187,7 @@ func sanitizeString(s string) string {
 	var result strings.Builder
 	for _, r := range s {
 		// Keep printable characters and space
-		if r >= 32 && r != 127 || r == '\t' {
+		if (r >= 32 && r != 127) || r == '\t' {
 			result.WriteRune(r)
 		}
 	}

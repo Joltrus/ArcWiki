@@ -272,7 +272,10 @@ func addPage(w http.ResponseWriter, r *http.Request) {
 		for _, categoryID := range categoryIDsToInsert {
 			_, err = tx.Exec("INSERT INTO CategoryPages (page_id, category_id) VALUES (?, ?)", pageID, categoryID)
 
-			log.Info("Inserting Category links" + string(pageID) + " " + string(categoryID)) // Clearer message
+			log.WithFields(log.Fields{
+				"pageID":     pageID,
+				"categoryID": categoryID,
+			}).Info("Inserting Category links")
 
 			if err != nil {
 				log.Error("Database Error:", err)
