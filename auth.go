@@ -15,6 +15,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ArcWiki/ArcWiki/validation"
 	"github.com/gorilla/sessions"
 	"github.com/houseme/mobiledetect"
 	"github.com/joho/godotenv"
@@ -101,13 +102,26 @@ func getUserAgent(r *http.Request) string {
 
 // CreateUser inserts a bcrypt-hashed user; no-op if username exists.
 func CreateUser(username, plainPassword string, isAdmin bool) error {
+	// Validate username
+	validatedUsername, err := validation.ValidateUsername(username)
+	if err != nil {
+		log.WithField("error", err).Warn("Invalid username during user creation")
+		return err
+	}
+
+	// Validate password
+	if err := validation.ValidatePassword(plainPassword); err != nil {
+		log.WithField("error", err).Warn("Invalid password during user creation")
+		return err
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 	_, err = authDB.Exec(
 		"INSERT INTO users(username,password,is_admin) VALUES(?,?,?)",
-		username, string(hash), boolToInt(isAdmin),
+		validatedUsername, string(hash), boolToInt(isAdmin),
 	)
 	if err != nil && !isUniqueConstraintError(err) {
 		return err
@@ -117,10 +131,29 @@ func CreateUser(username, plainPassword string, isAdmin bool) error {
 
 // Authenticate verifies credentials and returns (ok, isAdmin, error).
 func Authenticate(username, plainPassword string) (bool, bool, error) {
+	// Validate username
+	validatedUsername, err := validation.ValidateUsername(username)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error":    err,
+			"username": validation.SanitizeForLog(username),
+		}).Warn("Invalid username during authentication")
+		return false, false, nil
+	}
+
+	// Validate password
+	if err := validation.ValidatePassword(plainPassword); err != nil {
+		log.WithFields(log.Fields{
+			"error":    err,
+			"username": validation.SanitizeForLog(validatedUsername),
+		}).Warn("Invalid password during authentication")
+		return false, false, nil
+	}
+
 	var storedHash string
 	var isAdminInt int
-	err := authDB.QueryRow(
-		"SELECT password,is_admin FROM users WHERE username = ?", username,
+	err = authDB.QueryRow(
+		"SELECT password,is_admin FROM users WHERE username = ?", validatedUsername,
 	).Scan(&storedHash, &isAdminInt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -213,6 +246,7 @@ func loginHandler(w http.ResponseWriter, r *http.Request, title string, userAgen
 		return
 	}
 	if !ok {
+		log.WithField("username", validation.SanitizeForLog(user)).Warn("Failed login attempt")
 		http.Redirect(w, r, "/error", http.StatusSeeOther)
 		return
 	}
@@ -222,6 +256,6 @@ func loginHandler(w http.ResponseWriter, r *http.Request, title string, userAgen
 	session.Values["is_admin"] = isAdmin
 	session.Save(r, w)
 
-	log.Infof("Logged in: %s (admin=%v)", user, isAdmin)
+	log.Infof("Logged in: %s (admin=%v)", validation.SanitizeForLog(user), isAdmin)
 	http.Redirect(w, r, "/admin", http.StatusFound)
 }

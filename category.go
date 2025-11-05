@@ -29,6 +29,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ArcWiki/ArcWiki/db"
+	"github.com/ArcWiki/ArcWiki/validation"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -42,6 +43,16 @@ type Category struct {
 }
 
 func (p *Category) deleteCategory() error {
+	// Validate title
+	validatedTitle, err := validation.ValidateCategoryName(p.Title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(p.Title),
+		}).Error("Invalid category name during deleteCategory")
+		return err
+	}
+
 	db, err := db.LoadDatabase()
 
 	if err != nil {
@@ -57,7 +68,7 @@ func (p *Category) deleteCategory() error {
 	}
 	defer stmt.Close()
 
-	result, err := stmt.Exec(p.Title)
+	result, err := stmt.Exec(validatedTitle)
 	if err != nil {
 		log.Error("Database Error", err)
 	}
@@ -69,17 +80,41 @@ func (p *Category) deleteCategory() error {
 
 	if rowsDeleted > 0 {
 
-		log.Info("Deleted", rowsDeleted, "category with title:", p.Title)
+		log.WithFields(log.Fields{
+			"rows":  rowsDeleted,
+			"title": validation.SanitizeForLog(validatedTitle),
+		}).Info("Deleted category")
 	} else {
-		log.Info("No category found with title:", p.Title)
+		log.WithField("title", validation.SanitizeForLog(validatedTitle)).Info("No category found")
 	}
 	return nil
 }
 func (p *Page) saveCat() error {
+	// Validate title
+	validatedTitle, err := validation.ValidateCategoryName(p.Title)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(p.Title),
+		}).Error("Invalid category name during saveCat")
+		return err
+	}
 
-	log.Info("titlehere.." + p.Title + ".. " + string(p.Body))
+	// Validate body
+	validatedBody, err := validation.ValidateBody(string(p.Body))
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(validatedTitle),
+		}).Error("Invalid body during saveCat")
+		return err
+	}
 
-	err := dbsql("UPDATE Categories SET body = ? WHERE title = ?", string(p.Body), p.Title)
+	log.WithFields(log.Fields{
+		"title": validation.SanitizeForLog(validatedTitle),
+	}).Info("Saving category")
+
+	err = dbsql("UPDATE Categories SET body = ? WHERE title = ?", validatedBody, validatedTitle)
 	if err != nil {
 		log.Error("Database Error", err)
 
@@ -121,9 +156,23 @@ func getCategoryIDByName(categoryName string) (int, error) {
 func addCat(w http.ResponseWriter, r *http.Request) {
 	//new
 	categoryName := r.URL.Path[len("/category/"):]
+
+	// Validate category name
+	validatedCategoryName, err := validation.ValidateCategoryName(categoryName)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"name":  validation.SanitizeForLog(categoryName),
+		}).Error("Invalid category name during addCat")
+		http.Error(w, "Invalid category name: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	db, err := db.LoadDatabase()
 	if err != nil {
 		log.Error("Database Error", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 
 	}
 	defer db.Close()
@@ -131,13 +180,17 @@ func addCat(w http.ResponseWriter, r *http.Request) {
 	stmt, err := db.Prepare("INSERT INTO Categories (title, body, user_id) VALUES (?, ?, ?)")
 	if err != nil {
 		log.Error("Database Error", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 
 	}
 	defer stmt.Close()
 
-	res, err := stmt.Exec(canonicalizeTitle(categoryName), "", 1)
+	res, err := stmt.Exec(canonicalizeTitle(validatedCategoryName), "", 1)
 	if err != nil {
 		log.Error("Database Error", err)
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 
 	}
 	rowsAffected, err := res.RowsAffected()
@@ -149,7 +202,7 @@ func addCat(w http.ResponseWriter, r *http.Request) {
 		log.Info("Category inserted successfully!")
 		http.Redirect(w, r, "/title/Special:Categories", http.StatusFound)
 	}
-	log.Debug("Category Name", categoryName)
+	log.WithField("name", validation.SanitizeForLog(validatedCategoryName)).Debug("Category Name")
 
 }
 func checkCategoryExistence(categoryName string) bool {

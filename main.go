@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/ArcWiki/ArcWiki/db"
+	"github.com/ArcWiki/ArcWiki/validation"
 	"github.com/houseme/mobiledetect"
 	log "github.com/sirupsen/logrus"
 
@@ -59,9 +60,9 @@ func viewHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 	}
 
 	log.WithFields(log.Fields{
-		"path":     path,
-		"title":    title,
-		"category": category,
+		"path":     validation.SanitizeForLog(path),
+		"title":    validation.SanitizeForLog(title),
+		"category": validation.SanitizeForLog(category),
 	}).Debug("ViewHandler called")
 
 	switch {
@@ -91,7 +92,10 @@ func handleHelpPage(w http.ResponseWriter, r *http.Request, category, userAgent 
 	specialPageName := strings.TrimSpace(strings.TrimPrefix(category, "Help:"))
 	p, err := loadPage("Help-"+specialPageName, userAgent)
 	if err != nil {
-		log.WithError(err).WithField("page", specialPageName).Error("Help page not found")
+		log.WithFields(log.Fields{
+			"error": err,
+			"page":  validation.SanitizeForLog(specialPageName),
+		}).Error("Help page not found")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -118,7 +122,10 @@ func handleSpecialPage(w http.ResponseWriter, r *http.Request, category, userAge
 	specialPageName := strings.TrimSpace(strings.TrimPrefix(category, "Special:"))
 	p, err := loadPageSpecial(specialPageName, userAgent)
 	if err != nil {
-		log.WithError(err).WithField("page", specialPageName).Error("Special page error")
+		log.WithFields(log.Fields{
+			"error": err,
+			"page":  validation.SanitizeForLog(specialPageName),
+		}).Error("Special page error")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -134,7 +141,10 @@ func handleCategoryPage(w http.ResponseWriter, r *http.Request, title, category,
 	p, err := loadPageCategory(categoryName, userAgent)
 
 	if err != nil {
-		log.WithError(err).WithField("category", categoryName).Error("Failed to load category")
+		log.WithFields(log.Fields{
+			"error":    err,
+			"category": validation.SanitizeForLog(categoryName),
+		}).Error("Failed to load category")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -143,7 +153,7 @@ func handleCategoryPage(w http.ResponseWriter, r *http.Request, title, category,
 func renderOrRedirect(w http.ResponseWriter, r *http.Request, title, userAgent string) {
 	p, err := loadPage(title, userAgent)
 	if err != nil {
-		log.WithField("title", title).Error("Falling back to Main_Page")
+		log.WithField("title", validation.SanitizeForLog(title)).Error("Falling back to Main_Page")
 		http.Redirect(w, r, "/title/Main_Page", http.StatusFound)
 		return
 	}
@@ -153,7 +163,7 @@ func renderOrRedirect(w http.ResponseWriter, r *http.Request, title, userAgent s
 // Edit Handler with a switch for editing Categories
 func editHandler(w http.ResponseWriter, r *http.Request, title string, userAgent string) {
 	updated_at := "Not Available"
-	log.Debug(title)
+	log.WithField("title", validation.SanitizeForLog(title)).Debug("Edit handler called")
 	size := ""
 	if userAgent == Desktop {
 		size = "<div class=\"col-11 d-none d-sm-block\">"
@@ -166,7 +176,7 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 	case strings.Contains(category, ":"):
 		categoryParts := strings.Split(category, ":")
 		categoryName := strings.TrimSpace(categoryParts[1])
-		log.Debug("Category:", categoryName)
+		log.WithField("category", validation.SanitizeForLog(categoryName)).Debug("Category edit")
 
 		session, _ := store.Get(r, "cookie-name")
 		auth, ok := session.Values["authenticated"].(bool)
@@ -219,8 +229,19 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 func saveCatHandler(w http.ResponseWriter, r *http.Request, title string, userAgent string) {
 	body := r.FormValue("body")
 
-	p := &Page{Title: title, Body: template.HTML(body)}
-	err := p.saveCat()
+	// Validate body
+	validatedBody, err := validation.ValidateBody(body)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+			"title": validation.SanitizeForLog(title),
+		}).Error("Invalid body during saveCatHandler")
+		http.Error(w, "Invalid body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	p := &Page{Title: title, Body: template.HTML(validatedBody)}
+	err = p.saveCat()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -242,7 +263,7 @@ func makeHandler(fn func(http.ResponseWriter, *http.Request, string, string)) ht
 
 		m := validPath.FindStringSubmatch(cleanPath)
 		if m == nil {
-			log.Errorf("Handler Error: path did not match validPath regex  path=%q", r.URL.Path)
+			log.WithField("path", validation.SanitizeForLog(r.URL.Path)).Error("Handler Error: path did not match validPath regex")
 			http.NotFound(w, r)
 			return
 		}
