@@ -9,9 +9,11 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -56,12 +58,19 @@ func init() {
 		log.Fatalf("auth: invalid SESSION_KEY: %v", err)
 	}
 
+	// Determine whether cookie should be marked Secure.
+	// Default to false (so local dev on http works). Set SESSION_SECURE=true in production to enable Secure cookies.
+	secureFlag := false
+	if strings.ToLower(os.Getenv("SESSION_SECURE")) == "true" {
+		secureFlag = true
+	}
+
 	// Initialize Gorilla session store
 	store = sessions.NewCookieStore(key)
 	store.Options = &sessions.Options{
 		Path:     "/",
 		MaxAge:   86400 * 7,
-		Secure:   true,
+		Secure:   secureFlag,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	}
@@ -83,7 +92,9 @@ func requireLogin(next http.HandlerFunc) http.HandlerFunc {
 		auth, ok := session.Values["authenticated"].(bool)
 
 		if !ok || !auth {
-			http.Redirect(w, r, "/login", http.StatusFound)
+			// Preserve the requested URL so we can return after login.
+			escaped := url.QueryEscape(r.URL.RequestURI())
+			http.Redirect(w, r, "/login?next="+escaped, http.StatusFound)
 			return
 		}
 
@@ -185,7 +196,17 @@ func loginFormHandler(w http.ResponseWriter, r *http.Request, title string, user
 	if userAgent == Mobile {
 		size = `<div class="col-12 d-block d-sm-none">`
 	}
-	bodyMark := `<form action="/loginPost" method="post">
+
+	// Preserve any "next" query param so the login form can include it.
+	nextParam := r.URL.Query().Get("next")
+	nextInput := ""
+	if nextParam != "" {
+		// Keep the raw value in the hidden input; it's validated on POST.
+		escaped := template.HTMLEscapeString(nextParam)
+		nextInput = fmt.Sprintf(`<input type="hidden" name="next" value="%s">`, escaped)
+	}
+
+	bodyMark := fmt.Sprintf(`<form action="/loginPost" method="post">
         <div class="form-group">
           <label for="username">Username:</label>
           <input class="form-control" type="text" id="username" name="username">
@@ -194,8 +215,9 @@ func loginFormHandler(w http.ResponseWriter, r *http.Request, title string, user
           <label for="password">Password:</label>
           <input class="form-control" type="password" id="password" name="password">
         </div>
+        %s
         <button class="bg-dark hover:bg-gray-100 text-white font-semibold py-2 px-4 border border-gray-400 rounded shadow" type="submit">Login</button>
-    </form>`
+    </form>`, nextInput)
 
 	parsedText := addHeadingIDs(bodyMark)
 	happyhtml := createHeadingList(parsedText)
@@ -254,8 +276,25 @@ func loginHandler(w http.ResponseWriter, r *http.Request, title string, userAgen
 	session, _ := store.Get(r, "cookie-name")
 	session.Values["authenticated"] = true
 	session.Values["is_admin"] = isAdmin
-	session.Save(r, w)
+	if err := session.Save(r, w); err != nil {
+		log.Errorf("session save error: %v", err)
+		http.Redirect(w, r, "/error", http.StatusSeeOther)
+		return
+	}
 
 	log.Infof("Logged in: %s (admin=%v)", validation.SanitizeForLog(user), isAdmin)
-	http.Redirect(w, r, "/admin", http.StatusFound)
+
+	// Respect next param if provided, but validate it to avoid open redirects.
+	next := r.FormValue("next")
+	if next == "" {
+		next = "/admin"
+	} else {
+		// Basic validation: must be an internal path (start with a single '/'), and not contain protocol.
+		if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "://") {
+			log.Warnf("Invalid next parameter after login: %s", next)
+			next = "/admin"
+		}
+	}
+
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
