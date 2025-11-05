@@ -87,16 +87,16 @@ func manageCategory(userAgent string, baseURL string, w http.ResponseWriter) {
 		size = "<div class=\"col-12 d-block d-sm-none\">"
 	}
 
-	db, err := db.LoadDatabase()
+	dbh, err := db.LoadDatabase()
 	if err != nil {
 
 		log.Error("Database Error", err)
 		return
 
 	}
-	defer db.Close()
+	defer dbh.Close()
 
-	rows, err := db.Query("SELECT title FROM Categories")
+	rows, err := dbh.Query("SELECT title FROM Categories")
 	if err != nil {
 
 		log.Error("Database Error", err)
@@ -106,15 +106,15 @@ func manageCategory(userAgent string, baseURL string, w http.ResponseWriter) {
 
 	var pageLinks []string
 	for rows.Next() {
-		var title string
-		err := rows.Scan(&title)
+		var t string
+		err := rows.Scan(&t)
 		if err != nil {
 
 			log.Error("Database Error", err)
 			return
 
 		}
-		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Category</a> <a href=\"%s\"> Delete Category</a></li>", baseURL, "Category:"+title, title, "/edit/Cat["+title+"]", "/delete/category/"+title))
+		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Category</a> <a href=\"%s\"> Delete Category</a></li>", baseURL, "Category:"+t, t, "/edit/Cat["+t+"]", "/delete/category/"+t))
 	}
 
 	bodyHTML := fmt.Sprintf("<h2 class=\"wikih2\">Manage Pages</h2><ul>\n%s\n</ul>", strings.Join(pageLinks, "\n"))
@@ -139,15 +139,15 @@ func managePages(userAgent string, baseURL string, w http.ResponseWriter) {
 		size = "<div class=\"col-12 d-block d-sm-none\">"
 	}
 
-	db, err := db.LoadDatabase()
+	dbh, err := db.LoadDatabase()
 	if err != nil {
 		log.Error("Error loading database", err)
 		return
 
 	}
-	defer db.Close()
+	defer dbh.Close()
 
-	rows, err := db.Query("SELECT title FROM Pages")
+	rows, err := dbh.Query("SELECT title FROM Pages")
 	if err != nil {
 
 		log.Error("Database Error", err)
@@ -157,14 +157,14 @@ func managePages(userAgent string, baseURL string, w http.ResponseWriter) {
 
 	var pageLinks []string
 	for rows.Next() {
-		var title string
-		err := rows.Scan(&title)
+		var t string
+		err := rows.Scan(&t)
 		if err != nil {
 			log.Error("Database Error", err)
 			return
 
 		}
-		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Page</a> <a href=\"%s\"> Delete Page</a></li>", baseURL, title, title, "/edit/"+title, "/delete/page/"+title))
+		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Page</a> <a href=\"%s\"> Delete Page</a></li>", baseURL, t, t, "/edit/"+t, "/delete/page/"+t))
 	}
 
 	bodyHTML := fmt.Sprintf("<h2 class=\"wikih2\">Manage Pages</h2><ul>\n%s\n</ul>", strings.Join(pageLinks, "\n"))
