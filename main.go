@@ -101,16 +101,16 @@ func handleHelpPage(w http.ResponseWriter, r *http.Request, category, userAgent 
 	renderTemplate(w, "title", p)
 }
 func handleRandomPage(w http.ResponseWriter, r *http.Request) {
-	db, err := db.LoadDatabase()
+	dbh, err := db.LoadDatabase()
 	if err != nil {
 		log.WithError(err).Error("Failed to load DB for random page")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	defer db.Close()
+	defer dbh.Close()
 
 	var title string
-	if err := db.QueryRow("SELECT title FROM Pages ORDER BY RANDOM() LIMIT 1").Scan(&title); err != nil {
+	if err := dbh.QueryRow("SELECT title FROM Pages ORDER BY RANDOM() LIMIT 1").Scan(&title); err != nil {
 		log.Warn("No pages found for random redirect")
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
@@ -364,14 +364,14 @@ func errorPage(w http.ResponseWriter, r *http.Request) {
 
 }
 func dbsql(stater string, args ...interface{}) error {
-	db, err := db.LoadDatabase()
+	dbh, err := db.LoadDatabase()
 	if err != nil {
 		log.Error("Error Loading Database:", err)
 
 	}
-	defer db.Close() // Ensure database closure
+	defer dbh.Close() // Ensure database closure
 
-	stmt, err := db.Prepare(stater)
+	stmt, err := dbh.Prepare(stater)
 	if err != nil {
 		log.Error("Database Error: ", err)
 	}
@@ -404,6 +404,7 @@ func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
 		log.Error("Error Occurred in renderTemplate: ", err)
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
