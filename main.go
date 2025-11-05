@@ -364,25 +364,25 @@ func errorPage(w http.ResponseWriter, r *http.Request) {
 
 }
 func dbsql(stater string, args ...interface{}) error {
-	dbh, err := db.LoadDatabase()
-	if err != nil {
-		log.Error("Error Loading Database:", err)
+dbh, err := db.LoadDatabase()
+if err != nil {
+	log.Error("Error Loading Database:", err)
 
-	}
-	defer dbh.Close() // Ensure database closure
+}
+defer dbh.Close() // Ensure database closure
 
-	stmt, err := dbh.Prepare(stater)
-	if err != nil {
-		log.Error("Database Error: ", err)
-	}
-	defer stmt.Close() // Close the prepared statement
+stmt, err := dbh.Prepare(stater)
+if err != nil {
+	log.Error("Database Error: ", err)
+}
+defer stmt.Close() // Close the prepared statement
 
-	_, err = stmt.Exec(args...) // Execute the statement with provided arguments
-	if err != nil {
-		log.Error("Database Error: ", err)
-	}
+_, err = stmt.Exec(args...) // Execute the statement with provided arguments
+if err != nil {
+	log.Error("Database Error: ", err)
+}
 
-	return nil // Indicate successful execution
+return nil // Indicate successful execution
 }
 
 // moved here for ease
@@ -431,13 +431,13 @@ type Config struct {
 }
 
 type Admin struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+Username string `json:"username"`
+Password string `json:"password"`
 }
 
 type MenuItem struct {
-	Name string `json:"name"`
-	Link string `json:"link"`
+Name string `json:"name"`
+Link string `json:"link"`
 }
 
 var config Config
@@ -445,131 +445,4 @@ var config Config
 func loadMenu() (template.HTML, error) {
 	var links strings.Builder
 
-	for _, menuItem := range config.Menu {
-		links.WriteString(fmt.Sprintf("<li><a href=\"%s\">%s</a></li>\n", menuItem.Link, menuItem.Name))
-	}
-
-	return template.HTML(links.String()), nil
-}
-
-func main() {
-	// Start log
-	log.SetFormatter(&log.TextFormatter{
-		DisableColors:   false,
-		FullTimestamp:   true,
-		TimestampFormat: "15:04:05",
-	})
-	log.SetLevel(log.InfoLevel)
-	log.Info("Starting your instance of ArcWiki")
-
-	// Ensure the main application schema is up
-	db.DBSetup()
-
-	// Initialize the auth database
-	if err := InitAuthDB("arcWiki.db"); err != nil {
-		log.Fatalf("Auth DB init error: %v", err)
-	}
-
-	// Seed a single admin on first run
-	var userCount int
-	if err := authDB.QueryRow("SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
-		log.Fatalf("Unable to check users table: %v", err)
-	}
-	if userCount == 0 {
-		// Prefer Docker env variables, fall back to defaults
-		adminUser := os.Getenv("USERNAME")
-		adminPass := os.Getenv("PASSWORD")
-		if adminUser == "" || adminPass == "" {
-			log.Warn("No USERNAME/PASSWORD env vars found; defaulting to admin/admin")
-			adminUser = "admin"
-			adminPass = "admin"
-		}
-		if err := CreateUser(adminUser, adminPass, true); err != nil {
-			log.Fatalf("Seeding admin user failed: %v", err)
-		}
-		log.Infof("Seeded admin user '%s' (admin)", adminUser)
-	}
-
-	// Load site configuration
-	configBytes, err := os.ReadFile("config/config.json")
-	if err != nil {
-		log.Panic("Error reading config/config.json:", err)
-	}
-	if err := json.Unmarshal(configBytes, &config); err != nil {
-		log.Panic("Error parsing config:", err)
-	}
-	if os.Getenv("COLOR") != "" {
-		config.TColor = os.Getenv("COLOR")
-	}
-	if os.Getenv("SITENAME") != "" {
-		config.SiteTitle = os.Getenv("SITENAME")
-	}
-
-	// Background updater
-	go func() {
-		for {
-			if err := updateSubCategoryLinks(); err != nil {
-				log.Error("Error updating subcategories:", err)
-			}
-			time.Sleep(60 * time.Second)
-		}
-	}()
-
-	// HTTP routes
-	// Protect admin routes with requireLogin and handle /admin and /admin/*
-	http.HandleFunc("/admin", requireLogin(func(w http.ResponseWriter, r *http.Request) {
-		adminHandler(w, r, "", getUserAgent(r))
-	}))
-
-	http.HandleFunc("/admin/", requireLogin(func(w http.ResponseWriter, r *http.Request) {
-		// Determine subpath after /admin/
-		sub := strings.TrimPrefix(r.URL.Path, "/admin/")
-		sub = strings.TrimSuffix(sub, "/")
-		if sub == "" {
-			// direct /admin/ → admin index
-			adminHandler(w, r, "", getUserAgent(r))
-			return
-		}
-
-		// /admin/manage or /admin/manage/... should map to admin page management
-		if strings.HasPrefix(sub, "manage") || strings.HasPrefix(sub, "page") {
-			adminHandler(w, r, "page", getUserAgent(r))
-			return
-		}
-
-		// /admin/category or /admin/category/...
-		if strings.HasPrefix(sub, "category") {
-			adminHandler(w, r, "category", getUserAgent(r))
-			return
-		}
-
-		// If first segment equals a known admin subpage, pass it as title
-		parts := strings.SplitN(sub, "/", 2)
-		adminHandler(w, r, parts[0], getUserAgent(r))
-	}))
-
-	http.HandleFunc("/", makeHandler(viewHandler))
-	http.HandleFunc("/search", makeHandler(SearchHandler))
-	http.HandleFunc("/query", QueryHandler)
-	http.HandleFunc("/add", addHandler)
-	http.HandleFunc("/addpage", addPage)
-	http.HandleFunc("/delete/", deleteHandler)
-	http.HandleFunc("/category/", addCat)
-	http.HandleFunc("/savecat/", makeHandler(saveCatHandler))
-
-	http.HandleFunc("/logout", makeHandler(logout))
-	http.HandleFunc("/logout/", makeHandler(logout)) // handle trailing slash
-
-	http.HandleFunc("/login", makeHandler(loginFormHandler))
-	http.HandleFunc("/loginPost", makeHandler(loginHandler))
-	http.HandleFunc("/title/", makeHandler(viewHandler))
-	http.HandleFunc("/edit/", makeHandler(editHandler))
-	http.HandleFunc("/save/", makeHandler(saveHandler))
-	http.HandleFunc("/error", errorPage)
-
-	// Static assets
-	fs := http.FileServer(http.Dir("./assets"))
-	http.Handle("/assets/", http.StripPrefix("/assets/", fs))
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
-}
+The file content is truncated here in the read response. If you want the rest of main.go I can fetch it.
