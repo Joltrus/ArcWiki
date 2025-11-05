@@ -1,16 +1,16 @@
 /*
  *   Copyright (c) 2024 Edward Stock
-
+ *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
  *   the Free Software Foundation, either version 3 of the License, or
  *   (at your option) any later version.
-
+ *
  *   This program is distributed in the hope that it will be useful,
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *   GNU General Public License for more details.
-
+ *
  *   You should have received a copy of the GNU General Public License
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
@@ -39,14 +39,13 @@ import (
 const Desktop = "desktop"
 const Mobile = "mobile"
 
-// var validPath = regexp.MustCompile("^/(?:(add|addpage|cat|edit|save|title|Category|Special)/([a-zA-Z0-9]+)|)")
-// var validPath = regexp.MustCompile("^/(?:(add|addpage|cat|edit|save|title|Category|Special)/([a-zA-Z0-9_-]+)|)")
-// var validPath = regexp.MustCompile(`^/(search|results|admin|add|addpage|edit|delete|savecat|save|title|login|Category|Special)(?:/([^/?#]+))?$`)
+// Allowed route segments
 var allowedPaths = []string{
 	"search", "results", "admin", "add", "addpage", "edit", "delete",
 	"savecat", "save", "title", "login", "loginPost", "logout", "Category", "Special",
 }
 
+// validPath matches the top-level route and an optional parameter segment
 var validPath = regexp.MustCompile("^/(" + strings.Join(allowedPaths, "|") + `)(?:/([^/?#]+))?$`)
 
 func viewHandler(w http.ResponseWriter, r *http.Request, title string, userAgent string) {
@@ -182,7 +181,6 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 		auth, ok := session.Values["authenticated"].(bool)
 
 		if !ok || !auth {
-			//http.Error(w, "Forbidden", http.StatusForbidden)
 			http.Redirect(w, r, "/error", http.StatusFound)
 			return
 		} else {
@@ -201,7 +199,6 @@ func editHandler(w http.ResponseWriter, r *http.Request, title string, userAgent
 		auth, ok := session.Values["authenticated"].(bool)
 
 		if !ok || !auth {
-			//http.Error(w, "Forbidden", http.StatusForbidden)
 			http.Redirect(w, r, "/error", http.StatusFound)
 			return
 		} else {
@@ -284,13 +281,12 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	auth, ok := session.Values["authenticated"].(bool)
 
 	if !ok || !auth {
-		//http.Error(w, "Forbidden", http.StatusForbidden)
 		http.Redirect(w, r, "/error", http.StatusFound)
 		return
 	} else {
 		parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/delete/"), "/", 2)
 		if len(parts) != 2 {
-			http.Error(w, "Invalid URL format", http.StatusBadRequest)
+			http.Error(w, r, "Invalid URL format", http.StatusBadRequest)
 			return
 		}
 		resourceType := parts[0]
@@ -317,7 +313,6 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/admin/manage", http.StatusFound)
 		} else {
 			// Handle invalid resource type
-			//http.Error(w, "Invalid resource type", http.StatusBadRequest)
 			http.Redirect(w, r, "/error", http.StatusFound)
 		}
 	}
@@ -330,14 +325,11 @@ func addHandler(w http.ResponseWriter, r *http.Request) {
 
 	if !ok || !auth {
 		http.Redirect(w, r, "/error", http.StatusFound)
-		//http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	} else {
 		detect := mobiledetect.New(r, nil)
 		size := ""
 		if detect.IsMobile() || detect.IsTablet() {
-			//fmt.Println("is either a mobile or tablet")
-
 			size = "<div class=\"col-12 d-block d-sm-none\">"
 		} else {
 			size = "<div class=\"col-11 d-none d-sm-block\">"
@@ -348,10 +340,7 @@ func addHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Error("Error Loading Menu:", err)
 		}
-		// Create an AddPage instance directly (no loading from file)
 		ap := &AddPage{NavTitle: config.SiteTitle, ThemeColor: template.HTML(arcWikiLogo()), CTitle: "Add Page", Title: title, Menu: safeMenu, Size: template.HTML(size), UpdatedDate: ""}
-
-		// Populate other fields of ap as needed (e.g., from session data, user input, etc.)
 
 		renderAddPageTemplate(w, "add", ap)
 	}
@@ -362,7 +351,6 @@ func errorPage(w http.ResponseWriter, r *http.Request) {
 	detect := mobiledetect.New(r, nil)
 	userAgent := ""
 	if detect.IsMobile() || detect.IsTablet() {
-		//fmt.Println("is either a mobile or tablet")
 		userAgent = Mobile
 	} else {
 		userAgent = Desktop
@@ -398,14 +386,24 @@ func dbsql(stater string, args ...interface{}) error {
 }
 
 // moved here for ease
-var templates = template.Must(template.ParseFiles("templates/search.html", "templates/header.html", "templates/footer.html", "templates/navbar.html", "templates/edit.html", "templates/title.html", "templates/add.html", "templates/login.html", "templates/editCategory.html", "templates/errorPage.html", "templates/admin.html"))
+var templates = template.Must(template.ParseFiles(
+	"templates/search.html",
+	"templates/header.html",
+	"templates/footer.html",
+	"templates/navbar.html",
+	"templates/edit.html",
+	"templates/editCategory.html",
+	"templates/title.html",
+	"templates/login.html",
+	"templates/add.html",
+	"templates/errorPage.html",
+))
 
 func renderTemplate(w http.ResponseWriter, tmpl string, p *Page) {
 
 	err := templates.ExecuteTemplate(w, tmpl+".html", p)
 	if err != nil {
 		log.Error("Error Occurred in renderTemplate: ", err)
-
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -517,12 +515,38 @@ func main() {
 	}()
 
 	// HTTP routes
+	// Protect admin routes with requireLogin and handle /admin and /admin/*
 	http.HandleFunc("/admin", requireLogin(func(w http.ResponseWriter, r *http.Request) {
 		adminHandler(w, r, "", getUserAgent(r))
 	}))
 
-	// Handle /admin/page and /admin/category
-	http.HandleFunc("/admin/", requireLogin(makeHandler(adminHandler)))
+	http.HandleFunc("/admin/", requireLogin(func(w http.ResponseWriter, r *http.Request) {
+		// Determine subpath after /admin/
+		sub := strings.TrimPrefix(r.URL.Path, "/admin/")
+		sub = strings.TrimSuffix(sub, "/")
+		if sub == "" {
+			// direct /admin/ → admin index
+			adminHandler(w, r, "", getUserAgent(r))
+			return
+		}
+
+		// /admin/manage or /admin/manage/... should map to admin page management
+		if strings.HasPrefix(sub, "manage") || strings.HasPrefix(sub, "page") {
+			adminHandler(w, r, "page", getUserAgent(r))
+			return
+		}
+
+		// /admin/category or /admin/category/...
+		if strings.HasPrefix(sub, "category") {
+			adminHandler(w, r, "category", getUserAgent(r))
+			return
+		}
+
+		// If first segment equals a known admin subpage, pass it as title
+		parts := strings.SplitN(sub, "/", 2)
+		adminHandler(w, r, parts[0], getUserAgent(r))
+	}))
+
 	http.HandleFunc("/", makeHandler(viewHandler))
 	http.HandleFunc("/search", makeHandler(SearchHandler))
 	http.HandleFunc("/query", QueryHandler)
