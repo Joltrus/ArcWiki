@@ -1,16 +1,16 @@
 /*
  *   Copyright (c) 2024 Edward Stock
-
+ *
  *   This program is free software: you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
  *   the Free Software Foundation, either version 3 of the License, or
  *   (at your option) any later version.
-
+ *
  *   This program is distributed in the hope that it will be useful,
  *   but WITHOUT ANY WARRANTY; without even the implied warranty of
  *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *   GNU General Public License for more details.
-
+ *
  *   You should have received a copy of the GNU General Public License
  *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ArcWiki/ArcWiki/db"
@@ -28,6 +29,16 @@ import (
 )
 
 func adminHandler(w http.ResponseWriter, r *http.Request, title string, userAgent string) {
+	// Defensive check: ensure the user is authenticated even if middleware/routing missed it.
+	// This ensures the admin view cannot be shown without a valid session.
+	session, _ := store.Get(r, "cookie-name")
+	auth, ok := session.Values["authenticated"].(bool)
+	if !ok || !auth {
+		escaped := url.QueryEscape(r.URL.RequestURI())
+		http.Redirect(w, r, "/login?next="+escaped, http.StatusFound)
+		return
+	}
+
 	baseURL := "/title/"
 
 	switch title {
@@ -103,7 +114,7 @@ func manageCategory(userAgent string, baseURL string, w http.ResponseWriter) {
 			return
 
 		}
-		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Category</a> <a href=\"%s\"> Delete Category</a></li>", baseURL, "Category:"+title, title, "/edit/Category:"+title, "/delete/category/"+title))
+		pageLinks = append(pageLinks, fmt.Sprintf("<li><a href=\"%s%s\">%s</a> <a href=\"%s\"> Edit Category</a> <a href=\"%s\"> Delete Category</a></li>", baseURL, "Category:"+title, title, "/edit/Cat["+title+"]", "/delete/category/"+title))
 	}
 
 	bodyHTML := fmt.Sprintf("<h2 class=\"wikih2\">Manage Pages</h2><ul>\n%s\n</ul>", strings.Join(pageLinks, "\n"))
