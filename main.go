@@ -364,25 +364,25 @@ func errorPage(w http.ResponseWriter, r *http.Request) {
 
 }
 func dbsql(stater string, args ...interface{}) error {
-dbh, err := db.LoadDatabase()
-if err != nil {
-	log.Error("Error Loading Database:", err)
+	dbh, err := db.LoadDatabase()
+	if err != nil {
+		log.Error("Error Loading Database:", err)
 
-}
-defer dbh.Close() // Ensure database closure
+	}
+	defer dbh.Close() // Ensure database closure
 
-stmt, err := dbh.Prepare(stater)
-if err != nil {
-	log.Error("Database Error: ", err)
-}
-defer stmt.Close() // Close the prepared statement
+	stmt, err := dbh.Prepare(stater)
+	if err != nil {
+		log.Error("Database Error: ", err)
+	}
+	defer stmt.Close() // Close the prepared statement
 
-_, err = stmt.Exec(args...) // Execute the statement with provided arguments
-if err != nil {
-	log.Error("Database Error: ", err)
-}
+	_, err = stmt.Exec(args...) // Execute the statement with provided arguments
+	if err != nil {
+		log.Error("Database Error: ", err)
+	}
 
-return nil // Indicate successful execution
+	return nil // Indicate successful execution
 }
 
 // moved here for ease
@@ -431,13 +431,13 @@ type Config struct {
 }
 
 type Admin struct {
-Username string `json:"username"`
-Password string `json:"password"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 type MenuItem struct {
-Name string `json:"name"`
-Link string `json:"link"`
+	Name string `json:"name"`
+	Link string `json:"link"`
 }
 
 var config Config
@@ -507,7 +507,7 @@ func main() {
 	http.HandleFunc("/search", makeHandler(SearchHandler))
 	http.HandleFunc("/results", QueryHandler)
 	http.HandleFunc("/error", errorPage)
-	
+
 	// Auth routes
 	http.HandleFunc("/login", makeHandler(loginFormHandler))
 	http.HandleFunc("/loginPost", makeHandler(loginHandler))
