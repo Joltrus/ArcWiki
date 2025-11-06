@@ -22,9 +22,8 @@ go.work
 go.work.sum
 
 #remove database
-#*.db
+*.db
 #remove workspace
 gowiki.code-workspace
 wiki.backup
 .env
-arcWiki.db
