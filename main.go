@@ -286,7 +286,7 @@ func deleteHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/delete/"), "/", 2)
 		if len(parts) != 2 {
-			http.Error(w, r, "Invalid URL format", http.StatusBadRequest)
+			http.Error(w, "Invalid URL format", http.StatusBadRequest)
 			return
 		}
 		resourceType := parts[0]
@@ -445,4 +445,92 @@ var config Config
 func loadMenu() (template.HTML, error) {
 	var links strings.Builder
 
-The file content is truncated here in the read response. If you want the rest of main.go I can fetch it.
+	file, err := os.ReadFile("config/config.json")
+	if err != nil {
+		log.Fatal("Error loading config:", err)
+	}
+	if err := json.Unmarshal(file, &config); err != nil {
+		log.Fatal("Error parsing config:", err)
+	}
+
+	for _, item := range config.Menu {
+		links.WriteString(fmt.Sprintf("<li><a href=\"%s\">%s</a></li>", item.Link, item.Name))
+	}
+	return template.HTML(links.String()), nil
+}
+
+func main() {
+	// Initialize logging
+	log.SetLevel(log.InfoLevel)
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+
+	// Initialize database
+	db.DBSetup()
+
+	// Initialize auth database
+	dbPath := "arcwiki.db"
+	if err := InitAuthDB(dbPath); err != nil {
+		log.Fatalf("Failed to initialize auth DB: %v", err)
+	}
+
+	// Create default admin user if env vars are set
+	username := os.Getenv("USERNAME")
+	password := os.Getenv("PASSWORD")
+	if username == "" || password == "" {
+		username = "admin"
+		password = "admin"
+		log.Info("No USERNAME/PASSWORD env vars found; defaulting to admin/admin")
+	}
+	if err := CreateUser(username, password, true); err != nil {
+		log.Warnf("Could not create admin user: %v", err)
+	}
+
+	// Periodically update subcategory links
+	go func() {
+		for {
+			if err := updateSubCategoryLinks(); err != nil {
+				log.Errorf("Failed to update subcategory links: %v", err)
+			}
+			time.Sleep(5 * time.Minute)
+		}
+	}()
+
+	// Set up HTTP routes
+	// Static files
+	http.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("assets"))))
+
+	// Public routes
+	http.HandleFunc("/", makeHandler(viewHandler))
+	http.HandleFunc("/title/", makeHandler(viewHandler))
+	http.HandleFunc("/search", makeHandler(SearchHandler))
+	http.HandleFunc("/results", QueryHandler)
+	http.HandleFunc("/error", errorPage)
+	
+	// Auth routes
+	http.HandleFunc("/login", makeHandler(loginFormHandler))
+	http.HandleFunc("/loginPost", makeHandler(loginHandler))
+	http.HandleFunc("/logout", makeHandler(logout))
+
+	// Protected routes - require authentication
+	http.HandleFunc("/admin", requireLogin(makeHandler(adminHandler)))
+	http.HandleFunc("/admin/", requireLogin(makeHandler(adminHandler)))
+	http.HandleFunc("/edit/", requireLogin(makeHandler(editHandler)))
+	http.HandleFunc("/save/", requireLogin(makeHandler(saveHandler)))
+	http.HandleFunc("/savecat/", requireLogin(makeHandler(saveCatHandler)))
+	http.HandleFunc("/add", requireLogin(addHandler))
+	http.HandleFunc("/addpage", requireLogin(addPage))
+	http.HandleFunc("/delete/", requireLogin(deleteHandler))
+	http.HandleFunc("/category/", requireLogin(addCat))
+
+	// Start server
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Infof("Starting server on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Server failed to start: %v", err)
+	}
+}
